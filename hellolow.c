@@ -18,11 +18,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <assert.h>
+#include "tosfs.h"
 
 static const char *hello_str = "Hello World!\n";
 static const char *hello_name = "hello";
+extern void* fs_data;
 
-static int hello_ll_stat(fuse_ino_t ino, struct stat *stbuf)
+static int ll_stat(fuse_ino_t ino, struct stat *stbuf)
 {
 	stbuf->st_ino = ino;
 	switch (ino) {
@@ -43,21 +45,36 @@ static int hello_ll_stat(fuse_ino_t ino, struct stat *stbuf)
 	return 0;
 }
 
-static void lowhello_ll_getattr(fuse_req_t req, fuse_ino_t ino,
+static void low_getattr(fuse_req_t req, fuse_ino_t ino,
 			     struct fuse_file_info *fi)
 {
+	struct tosfs_superblock* superBlock = (struct tosfs_superblock*) (fs_data);
 	struct stat stbuf;
-
+	struct tosfs_inode *inode_table= &superBlock + 1;
+	inode_table += ino; 
+	if (inode_table == NULL) {
+    	fuse_reply_err(req, ENOENT); 
+    return;
+	}
 	(void) fi;
 
 	memset(&stbuf, 0, sizeof(stbuf));
-	if (hello_ll_stat(ino, &stbuf) == -1)
+	stbuf.st_ino = ino;
+	stbuf.st_size = inode_table->size;
+    stbuf.st_mode = inode_table->mode;
+    stbuf.st_nlink = inode_table->nlink;
+    stbuf.st_uid = inode_table->uid;
+    stbuf.st_gid = inode_table->gid;
+    stbuf.st_blksize = TOSFS_BLOCK_SIZE;
+    stbuf.st_blocks = 1; 
+
+	if (ll_stat(ino, &stbuf) == -1)
 		fuse_reply_err(req, ENOENT);
 	else
 		fuse_reply_attr(req, &stbuf, 1.0);
 }
 
-static void hello_ll_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
+static void low_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
 	struct fuse_entry_param e;
 
@@ -68,7 +85,7 @@ static void hello_ll_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 		e.ino = 2;
 		e.attr_timeout = 1.0;
 		e.entry_timeout = 1.0;
-		hello_stat(e.ino, &e.attr);
+		ll_stat(e.ino, &e.attr);
 
 		fuse_reply_entry(req, &e);
 	}
@@ -104,7 +121,7 @@ static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 		return fuse_reply_buf(req, NULL, 0);
 }
 
-static void hello_ll_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void low_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 			     off_t off, struct fuse_file_info *fi)
 {
 	(void) fi;
@@ -123,7 +140,7 @@ static void hello_ll_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 	}
 }
 
-static void hello_ll_open(fuse_req_t req, fuse_ino_t ino,
+static void low_open(fuse_req_t req, fuse_ino_t ino,
 			  struct fuse_file_info *fi)
 {
 	if (ino != 2)
@@ -134,7 +151,7 @@ static void hello_ll_open(fuse_req_t req, fuse_ino_t ino,
 		fuse_reply_open(req, fi);
 }
 
-static void hello_ll_read(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void low_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 			  off_t off, struct fuse_file_info *fi)
 {
 	(void) fi;
@@ -144,11 +161,11 @@ static void hello_ll_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 }
 
 static struct fuse_lowlevel_ops hello_ll_oper = {
-	.lookup		= hello_ll_lookup,
-	.getattr	= lowhello_ll_getattr,
-	.readdir	= hello_ll_readdir,
-	.open		= hello_ll_open,
-	.read		= hello_ll_read,
+	.lookup		= low_lookup,
+	.getattr	= low_getattr,
+	.readdir	= low_readdir,
+	.open		= low_open,
+	.read		= low_read,
 };
 
 int main(int argc, char *argv[])
